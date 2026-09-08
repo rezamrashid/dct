@@ -34,6 +34,8 @@ body { font-family: 'Inter', sans-serif; }
     padding: 0 !important; 
     margin: 0 !important; 
     height: auto !important; /* Allows layout to dynamically fit 100% of printable space */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   .no-print { 
     display: none !important; 
@@ -56,6 +58,7 @@ body { font-family: 'Inter', sans-serif; }
     border: none !important;       /* Explicitly wipes the thin bounding lines away */
     outline: none !important;      
     margin: 0 !important; 
+    padding-bottom: 8mm !important; /* NEW SAFETY BUFFER: Prevents content from triggering the bottom edge line */
     background: white !important; 
     box-sizing: border-box !important;
     page-break-after: always;      /* Keeps the break functional for multi-page documents */
