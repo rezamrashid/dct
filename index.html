@@ -6,8 +6,6 @@
 <title>Document Creator & Tracker</title>
 <!-- Tailwind CSS for Dark Slate & Amber corporate theme -->
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-<!-- Put this in your <head> right under the Tailwind script tag -->
-<script src="https://cloudflare.com"></script>
 <style>
 @import url('https://googleapis.com');
 body {
@@ -214,8 +212,8 @@ Verify Identity & Connect Workspace
 <button onclick="commitDocumentToLedger()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 px-4 rounded text-xs transition-colors tracking-wide">
 🔒 Lock & Commit Document to History
 </button>
-<button onclick="saveAsPDF()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-4 rounded text-xs transition-colors flex items-center gap-2">
-📄 Save as PDF
+<button onclick="window.print()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-4 rounded text-xs transition-colors">
+🖨 Print Document
 </button>
 </div>
 
@@ -1065,25 +1063,6 @@ syncLivePreviewCanvas();
 alert(`Successfully generated fresh Delivery Order draft cross-populated from data indices of document ${src.doc_number}. Price figures stripped out cleanly.`);
 }, 100);
 }
-
-function saveAsPDF() {
-  // Target the element that holds your print content
-  // Assuming it's wrapped around a class like 'print-canvas' or your direct text layout
-  const element = document.querySelector('.print-canvas') || document.body;
-  
-  // Configure the PDF settings to match your A4 dimensions cleanly
-  const opt = {
-    margin:       0,
-    filename:     'Document-Tracker.pdf',
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true, logging: false },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  };
-
-  // Run the conversion and save the file directly
-  html2pdf().set(opt).from(element).save();
-}
-
 </script>
 </body>
 </html>
