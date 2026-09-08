@@ -4,95 +4,87 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Document Creator & Tracker</title>
-<!-- Tailwind CSS for Dark Slate & Amber corporate theme --> 
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script> 
-
-<style> 
-@import url('https://googleapis.com'); 
-
-body { 
-  font-family: 'Inter', sans-serif; 
-} 
-
-/* Desktop Preview layout structures simulating exact physical scales */ 
-.a4-page { 
-  width: 210mm; 
-  height: 297mm; 
-  background: white; 
-  color: #0f172a; 
-  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); 
-  position: relative; 
-  box-sizing: border-box; 
-} 
-
-.a5-top-half { 
-  height: 148.5mm; 
-  box-sizing: border-box; 
-  position: relative; 
-} 
-
-@media print { 
-  /* 1. Global Reset to clean background and force accurate canvas sizing */ 
-  html, body { 
-    background: white !important; 
-    color: black !important; 
-    padding: 0 !important; 
-    margin: 0 !important; 
-    height: auto !important; 
-    min-height: 0 !important; /* FIX: Breaks screen-height constraints */
-    -webkit-print-color-adjust: exact !important; 
-    print-color-adjust: exact !important; 
-  } 
-
-  .no-print { 
-    display: none !important; 
-  } 
-
-  .print-canvas { 
-    width: 100% !important; 
-    height: auto !important; 
-    box-shadow: none !important; 
-    padding: 0 !important; 
-    margin: 0 !important; 
-  } 
-
-  /* 2. Clear forced boxes and shadows completely */ 
-  .a4-page, .a5-top-half { 
-    width: 100% !important; 
-    height: auto !important; 
-    min-height: 100% !important; 
-    box-shadow: none !important; 
-    -webkit-box-shadow: none !important; 
-    border: none !important; 
-    outline: none !important; 
-    margin: 0 !important; 
-    padding-bottom: 8mm !important; 
-    background: white !important; 
-    box-sizing: border-box !important; 
-    page-break-after: always; 
-  } 
-
-  /* 3. FIX: Stop the very last container from generating an empty trailing page */ 
-  .a4-page:last-of-type, .a5-top-half:last-of-type { 
-    page-break-after: avoid !important; 
-    break-after: avoid !important; 
-  } 
-
-  /* 4. Match the absolute page dimensions to A4 standard */ 
-  @page { 
-    size: A4 portrait; 
-    margin: 0mm !important; 
-  } 
-
-  body::before, body::after { 
-    display: none !important; 
-  } 
-} 
-</style> 
-</head> 
-
+<!-- Tailwind CSS for Dark Slate & Amber corporate theme -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+@import url('https://googleapis.com');
+body {
+font-family: 'Inter', sans-serif;
+}
+/* Desktop Preview layout structures simulating exact physical scales */
+.a4-page {
+width: 210mm;
+height: 297mm;
+background: white;
+color: #0f172a;
+box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+position: relative;
+box-sizing: border-box;
+}
+.a5-top-half {
+height: 148.5mm;
+box-sizing: border-box;
+position: relative;
+}
+@media print {
+/* 1. Global Reset to clean background and force accurate canvas sizing */
+html, body {
+background: white !important;
+color: black !important;
+padding: 0 !important;
+margin: 0 !important;
+height: auto !important;
+min-height: 0 !important; /* FIX: Breaks screen-height constraints */
+-webkit-print-color-adjust: exact !important;
+print-color-adjust: exact !important;
+border: 0 !important;    /* FIX: Force remove any inherited borders */
+outline: 0 !important;   /* FIX: Force remove any inherited outlines */
+}
+.no-print {
+display: none !important;
+}
+.print-canvas {
+width: 100% !important;
+height: auto !important;
+box-shadow: none !important;
+padding: 0 !important;
+margin: 0 !important;
+border: none !important;
+}
+/* 2. Clear forced boxes and shadows completely */
+.a4-page, .a5-top-half {
+width: 100% !important;
+height: auto !important;
+min-height: 100% !important;
+box-shadow: none !important;
+-webkit-box-shadow: none !important;
+border: 0 !important;
+border-style: none !important;
+outline: none !important;
+margin: 0 !important;
+padding-bottom: 8mm !important;
+background: white !important;
+box-sizing: border-box !important;
+page-break-after: always;
+}
+/* 3. FIX: Stop the very last container from generating an empty trailing page */
+.a4-page:last-of-type, .a5-top-half:last-of-type {
+page-break-after: avoid !important;
+break-after: avoid !important;
+}
+/* 4. Match the absolute page dimensions to A4 standard */
+@page {
+size: A4 portrait;
+margin: 0; /* FIX: Changed from 0mm !important to standard 0 to prevent browser border aliasing */
+}
+body::before, body::after {
+display: none !important;
+}
+}
+</style>
+</head>
 <!-- Added print: modifiers to override dark mode and flex mechanics cleanly -->
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col print:bg-white print:text-black print:min-h-0 print:display-block">
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col print:bg-white print:text-black print:min-h-0 print:block print:p-0 print:m-0">
 
 <!-- Encryption Credentials / Security Setup Gate Layer -->
 <div id="gateOverlay" class="fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-[100]">
