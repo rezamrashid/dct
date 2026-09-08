@@ -6,7 +6,6 @@
 <title>Document Creator & Tracker</title>
 <!-- Tailwind CSS for Dark Slate & Amber corporate theme -->
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-<script src="https://cloudflare.com"></script>
 <style>
 @import url('https://googleapis.com');
 body { font-family: 'Inter', sans-serif; }
@@ -26,10 +25,64 @@ body { font-family: 'Inter', sans-serif; }
   box-sizing: border-box;
   position: relative;
 }
+
+@media print {
+  /* 1. Global Reset to clean background and force accurate canvas sizing */
+  html, body { 
+    background: white !important; 
+    color: black !important; 
+    padding: 0 !important; 
+    margin: 0 !important; 
+    height: auto !important; /* Allows layout to dynamically fit 100% of printable space */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .no-print { 
+    display: none !important; 
+  }
+  .print-canvas { 
+    width: 100% !important; 
+    height: auto !important; 
+    box-shadow: none !important; 
+    padding: 0 !important; 
+    margin: 0 !important; 
+  }
+  
+  /* 2. Clear forced boxes and shadows completely */
+  .a4-page, .a5-top-half { 
+    width: 100% !important;        /* Let it expand safely to the exact paper dimensions */
+    height: auto !important;       /* Dropping 297mm here stops the physical text-overflowing box lines */
+    min-height: 100% !important;
+    box-shadow: none !important; 
+    -webkit-box-shadow: none !important; 
+    border: none !important;       /* Explicitly wipes the thin bounding lines away */
+    outline: none !important;      
+    margin: 0 !important; 
+    padding-bottom: 8mm !important; /* NEW SAFETY BUFFER: Prevents content from triggering the bottom edge line */
+    background: white !important; 
+    box-sizing: border-box !important;
+    page-break-after: always;      /* Keeps the break functional for multi-page documents */
+  }
+
+  /* 3. FIX: Stop the very last container from generating an empty trailing page */
+  .a4-page:last-of-type, .a5-top-half:last-of-type {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+  
+  /* 4. Match the absolute page dimensions to A4 standard */
+  @page { 
+    size: A4 portrait; 
+    margin: 0mm !important;        /* Wiping margin to 0mm gets rid of extra page spill lines */
+  }
+  body::before, body::after { 
+    display: none !important; 
+  }
+}
 </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
-  
+
 <!-- Encryption Credentials / Security Setup Gate Layer -->
 <div id="gateOverlay" class="fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-[100]">
 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md flex flex-col gap-4 shadow-2xl">
@@ -156,9 +209,8 @@ Verify Identity & Connect Workspace
 <button onclick="commitDocumentToLedger()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 px-4 rounded text-xs transition-colors tracking-wide">
 🔒 Lock & Commit Document to History
 </button>
-<button onclick="generatePDF()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-4 rounded text-xs transition-colors cursor-pointer">
-💾 Save as PDF
-</button>
+<button onclick="window.print()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-4 rounded text-xs transition-colors">
+🖨 Print Document
 </button>
 </div>
 
@@ -184,7 +236,7 @@ Verify Identity & Connect Workspace
 
 <!-- RIGHT LIVE PREVIEW CANVAS PANEL -->
 <section class="flex-1 bg-slate-800 p-6 overflow-auto flex justify-center items-start print-canvas">
-<div id="pdf-target" class="a4-page ...">
+<div id="printTargetPage" class="a4-page p-[15mm] flex flex-col justify-start gap-6">
 <!-- Core dynamic template blocks populated via synchronization update framework loops -->
 </div>
 </section>
@@ -1007,18 +1059,6 @@ tbody.appendChild(tr);
 syncLivePreviewCanvas();
 alert(`Successfully generated fresh Delivery Order draft cross-populated from data indices of document ${src.doc_number}. Price figures stripped out cleanly.`);
 }, 100);
-}
-
-function generatePDF() {
-  const element = document.getElementById('pdf-target');
-  const options = {
-    margin:       0,
-    filename:     'corporate_document.pdf',
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true }, 
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  };
-  html2pdf().set(options).from(element).save();
 }
 </script>
 </body>
