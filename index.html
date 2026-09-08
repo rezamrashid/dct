@@ -7,30 +7,33 @@
 <!-- Tailwind CSS for Dark Slate & Amber corporate theme -->
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700&display=swap');
+@import url('https://googleapis.com');
 body { font-family: 'Inter', sans-serif; }
-/* Print layout structures simulating exact physical scales */
+
+/* Desktop Preview layout structures simulating exact physical scales */
 .a4-page {
-width: 210mm;
-height: 297mm;
-background: white;
-color: #0f172a;
-box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-position: relative;
-box-sizing: border-box;
+  width: 210mm;
+  height: 297mm;
+  background: white;
+  color: #0f172a;
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+  position: relative;
+  box-sizing: border-box;
 }
 .a5-top-half {
-height: 148.5mm;
-box-sizing: border-box;
-position: relative;
+  height: 148.5mm;
+  box-sizing: border-box;
+  position: relative;
 }
+
 @media print {
-  /* This prevents the Tailwind bg-slate-900 from showing through */
-  body, html { 
+  /* 1. Global Reset to clean background and force accurate canvas sizing */
+  html, body { 
     background: white !important; 
     color: black !important; 
     padding: 0 !important; 
     margin: 0 !important; 
+    height: auto !important; /* Allows layout to dynamically fit 100% of printable space */
   }
   .no-print { 
     display: none !important; 
@@ -43,22 +46,34 @@ position: relative;
     margin: 0 !important; 
   }
   
+  /* 2. Clear forced boxes and shadows completely */
   .a4-page, .a5-top-half { 
-    width: 210mm !important; 
-    height: 297mm !important; 
+    width: 100% !important;        /* Let it expand safely to the exact paper dimensions */
+    height: auto !important;       /* Dropping 297mm here stops the physical text-overflowing box lines */
+    min-height: 100% !important;
     box-shadow: none !important; 
     -webkit-box-shadow: none !important; 
-    border: 0 !important;
-    outline: 0 !important;
+    border: none !important;       /* Explicitly wipes the thin bounding lines away */
+    outline: none !important;      
     margin: 0 !important; 
-    page-break-after: always; 
-    background: white !important; /* Changed from transparent to solid white */
+    background: white !important; 
     box-sizing: border-box !important;
+    page-break-after: always;      /* Keeps the break functional for multi-page documents */
+  }
+
+  /* 3. FIX: Stop the very last container from generating an empty trailing page */
+  .a4-page:last-of-type, .a5-top-half:last-of-type {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
   
+  /* 4. Match the absolute page dimensions to A4 standard */
   @page { 
     size: A4 portrait; 
-    margin: 5mm !important; 
+    margin: 0mm !important;        /* Wiping margin to 0mm gets rid of extra page spill lines */
+  }
+  body::before, body::after { 
+    display: none !important; 
   }
 }
 </style>
