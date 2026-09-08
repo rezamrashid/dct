@@ -25,7 +25,8 @@ box-sizing: border-box;
 position: relative;
 }
 @media print {
-  body { 
+  /* This prevents the Tailwind bg-slate-900 from showing through */
+  body, html { 
     background: white !important; 
     color: black !important; 
     padding: 0 !important; 
@@ -42,25 +43,22 @@ position: relative;
     margin: 0 !important; 
   }
   
-  /* FIXED CODE BELOW */
   .a4-page, .a5-top-half { 
     width: 210mm !important; 
     height: 297mm !important; 
-    box-shadow: none !important; /* Forces mobile to drop the shadow entirely */
-    -webkit-box-shadow: none !important; /* Extra safety for mobile Safari/Chrome */
+    box-shadow: none !important; 
+    -webkit-box-shadow: none !important; 
     border: 0 !important;
     outline: 0 !important;
     margin: 0 !important; 
     page-break-after: always; 
-    background: transparent !important;
+    background: white !important; /* Changed from transparent to solid white */
+    box-sizing: border-box !important;
   }
   
   @page { 
     size: A4 portrait; 
     margin: 5mm !important; 
-  }
-  body::before, body::after { 
-    display: none !important; 
   }
 }
 </style>
