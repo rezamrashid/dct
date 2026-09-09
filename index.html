@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Creator & Tracker</title>
+<!-- Tailwind CSS for Dark Slate & Amber corporate theme (v3: uses plain rgb/hex colors, which html2canvas/html2pdf can render — v4's oklch colors cannot be parsed by html2canvas and were the cause of the export failure) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- html2pdf.js dependency for direct local PDF generation exports -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+body {
+font-family: 'Inter', sans-serif;
+}
+/* Desktop Preview layout structures simulating exact physical scales */
+.a4-page {
+width: 210mm;
+height: 297mm;
+background: white;
+color: #0f172a;
+box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+position: relative;
+box-sizing: border-box;
+}
+.a5-top-half {
+height: 148.5mm;
+box-sizing: border-box;
+position: relative;
+}
+/* Container that holds one or more .a4-page sheets stacked vertically
+   on screen, one per printed page (see paginateDocumentIntoPages()). */
+.print-pages-stack {
+display: flex;
+flex-direction: column;
+align-items: flex-start;
+gap: 10mm;
+}
+/* Off-screen template used only to measure real rendered height of the
+   generated document content at true A4 width, before it gets split
+   into page-sized chunks. Positioned off-screen rather than display:none
+   so the browser still computes real layout/line-wrap measurements. */
+.a4-measure-source {
+position: fixed;
+top: 0;
+left: -99999px;
+width: 210mm;
+box-sizing: border-box;
+background: white;
+color: #0f172a;
+}
+/* Right/bottom live-preview panel: each .a4-page inside keeps its true
+   210mm x 297mm size, but the whole stack is scaled down visually to
+   fit whatever space the panel actually has (desktop side panel or
+   mobile bottom panel). previewScaleOuter is sized in JS to the
+   *scaled* footprint of the stack so the surrounding flex/scroll
+   layout collapses around it correctly instead of leaving a huge
+   blank gap or clipping it. */
+.preview-scale-outer {
+position: relative;
+overflow: hidden;
+}
+.preview-scale-inner {
+position: absolute;
+top: 0;
+left: 0;
+transform-origin: top left;
+}
+@media (max-width: 1023.98px) {
+#previewPanelSection {
+min-height: 60vh;
+}
+}
+@media print {
+html, body {
+background: white !important;
+color: black !important;
+padding: 0 !important;
+margin: 0 !important;
+height: auto !important;
+min-height: 0 !important;
+-webkit-print-color-adjust: exact !important;
+print-color-adjust: exact !important;
+border: 0 !important;
+outline: 0 !important;
+}
+.no-print {
+display: none !important;
+}
+#appWorkspace, main {
+display: block !important;
+height: auto !important;
+min-height: 0 !important;
+overflow: visible !important;
+}
+.print-canvas {
+width: 100% !important;
+height: auto !important;
+max-height: none !important;
+overflow: visible !important;
+box-shadow: none !important;
+padding: 0 !important;
+margin: 0 !important;
+border: none !important;
+background: white !important;
+background-color: white !important;
+display: block !important;
+}
+.a4-page, .a5-top-half {
+width: 100% !important;
+box-shadow: none !important;
+-webkit-box-shadow: none !important;
+border: 0 !important;
+border-style: none !important;
+outline: none !important;
+margin: 0 !important;
+background: white !important;
+box-sizing: border-box !important;
+page-break-after: always;
+page-break-inside: avoid;
+break-inside: avoid;
+overflow: hidden;
+}
+/* Pages are now pre-paginated to fit exactly within true A4 height by
+   paginateDocumentIntoPages(), so (unlike the old single-flowing-page
+   approach) print keeps the fixed physical height instead of "auto" —
+   auto would let print re-flow/stretch a page that was already sized
+   to fit, and could throw off the deliberate per-page split. */
+.a4-page {
+height: 297mm !important;
+}
+.a5-top-half {
+height: 148.5mm !important;
+}
+.print-pages-stack {
+display: block !important;
+gap: 0 !important;
+}
+.preview-scale-outer, .preview-scale-inner {
+transform: none !important;
+width: auto !important;
+height: auto !important;
+position: static !important;
+}
+.a4-page:last-of-type, .a5-top-half:last-of-type {
+page-break-after: avoid !important;
+break-after: avoid !important;
+}
+@page {
+size: A4 portrait;
+margin: 0;
+}
+body::before, body::after {
+display: none !important;
+}
+}
+</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col print:bg-white print:text-black print:min-h-0 print:block print:p-0 print:m-0">
+
+<!-- Encryption Credentials / Security Setup Gate Layer -->
+<div id="gateOverlay" class="no-print fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-[100]">
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md flex flex-col gap-4 shadow-2xl">
+<div class="text-center mb-2">
+<h2 class="text-lg font-bold text-amber-500 tracking-tight flex items-center justify-center gap-2">
+<span>🔒</span> Secure Gateway Portal
+</h2>
+<p id="gateSub" class="text-xs text-slate-400 mt-1">Provide your access verification keys to unlock the platform workspace</p>
+</div>
+
+<!-- Initial Setup Input Elements -->
+<div id="setupFieldsBlock" class="flex flex-col gap-3">
+<div>
+<label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Supabase Project URL</label>
+<input type="text" id="gateUrl" placeholder="https://your-project.supabase.co" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Supabase Anon Key</label>
+<input type="password" id="gateKey" placeholder="public-anon-key-string" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+</div>
+
+<!-- Standard Authenticated Input Block Elements -->
+<div class="flex flex-col gap-3">
+<div>
+<label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Account Email</label>
+<input type="email" id="gateEmail" placeholder="name@domain.com" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Secure Password</label>
+<input type="password" id="gatePassword" placeholder="••••••••" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+</div>
+
+<button onclick="handleGatewaySubmit()" id="btnGateSubmit" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded text-xs transition-colors tracking-wide mt-2">
+Verify Identity & Connect Workspace
+</button>
+</div>
+</div>
+
+<!-- Core System Application Dashboard Wrapper -->
+<div id="appWorkspace" class="hidden flex-1 flex flex-col min-h-0">
+<!-- Top Configuration Bar -->
+<header class="no-print bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+<div>
+<h1 class="text-xl font-bold text-amber-500 tracking-tight flex items-center gap-2">
+<span>📁</span> Document Creator & Tracker
+</h1>
+<p class="text-xs text-slate-400">Brand Header: Reza bin Mohd Rashid</p>
+</div>
+<div class="flex items-center gap-3">
+<button onclick="handleLogout()" class="bg-slate-800 text-slate-300 px-4 py-1.5 rounded text-xs font-semibold hover:bg-red-600 hover:text-white transition-colors">
+🔒 Secure Logout
+</button>
+</div>
+</header>
+
+<!-- Main Workspace Frame -->
+<main class="flex-1 flex flex-col lg:flex-row min-h-0">
+<!-- LEFT CONTROL PANEL: Forms & CRM -->
+<section class="no-print w-full lg:w-[45%] bg-slate-950 p-6 overflow-y-auto border-r border-slate-800 flex flex-col gap-6">
+<!-- 5-in-1 Document Select Switch Matrix -->
+<div>
+<label class="block text-xs uppercase font-bold tracking-wider text-amber-500 mb-2">Select Active Document Module</label>
+<div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+<button onclick="switchDocType('Quotation')" id="btn-Quotation" class="doc-tab-btn bg-amber-500 text-slate-950 text-xs py-2 px-1 font-semibold rounded text-center transition-all">Quote</button>
+<button onclick="switchDocType('Invoice')" id="btn-Invoice" class="doc-tab-btn bg-slate-800 text-slate-400 text-xs py-2 px-1 font-semibold rounded text-center transition-all">Invoice</button>
+<button onclick="switchDocType('Receipt')" id="btn-Receipt" class="doc-tab-btn bg-slate-800 text-slate-400 text-xs py-2 px-1 font-semibold rounded text-center transition-all">Receipt</button>
+<button onclick="switchDocType('Payment Voucher')" id="btn-Voucher" class="doc-tab-btn bg-slate-800 text-slate-400 text-xs py-2 px-1 font-semibold rounded text-center transition-all">Voucher</button>
+<button onclick="switchDocType('Delivery Order')" id="btn-DO" class="doc-tab-btn bg-slate-800 text-slate-400 text-xs py-2 px-1 font-semibold rounded text-center transition-all">D.O.</button>
+</div>
+</div>
+
+<!-- Two-Tier Corporate CRM Block -->
+<div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+<div class="flex items-center justify-between mb-3">
+<h4 class="text-xs font-semibold text-slate-200 flex items-center gap-1">🏢 Corporate CRM Directory</h4>
+<div class="flex items-center gap-3">
+<button onclick="openDirectoryModal()" class="text-[10px] text-slate-400 hover:underline">⚙ Manage</button>
+<button onclick="toggleCRMModal()" class="text-[10px] text-amber-500 hover:underline">+ New Profile</button>
+</div>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Select Company Anchor</label>
+<select id="crmCompanySelect" onchange="handleCompanySelect()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
+<option value="">-- Choose Company --</option>
+</select>
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Attn. to: Contact</label>
+<select id="crmContactSelect" onchange="handleContactSelect()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
+<option value="">-- Choose Contact --</option>
+</select>
+</div>
+</div>
+</div>
+
+<!-- Active Document Fields Matrix -->
+<div id="dynamicFormContainer" class="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col gap-4"></div>
+
+<!-- Dynamic Line Items Grid Matrix -->
+<div id="itemsGridContainer" class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+<div class="flex items-center justify-between mb-2">
+<h4 class="text-xs font-semibold text-slate-200">📦 Transaction Line Items Matrix</h4>
+<button onclick="addGridRow()" class="bg-slate-800 hover:bg-slate-700 text-amber-500 px-3 py-1 rounded text-xs font-medium">+ Add Row</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left text-xs text-slate-300">
+<thead>
+<tr class="border-b border-slate-800">
+<th class="py-2">Description</th>
+<th class="py-2 w-16 px-2">Qty</th>
+<th class="py-2 w-24 price-cell">Unit Rate</th>
+<th class="py-2 w-10 text-right"></th>
+</tr>
+</thead>
+<tbody id="itemsGridBody"></tbody>
+</table>
+</div>
+</div>
+
+<!-- Core Operations Panel -->
+<div class="flex flex-col sm:flex-row items-stretch gap-2 mt-2">
+<button onclick="commitDocumentToLedger()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 px-3 rounded text-xs transition-colors tracking-wide">
+🔒 Lock & Commit to History
+</button>
+<button onclick="openFullscreenPreview()" class="bg-slate-800 hover:bg-slate-700 text-amber-500 font-semibold py-2.5 px-3 rounded text-xs transition-colors flex items-center justify-center gap-1">
+🔍 Full Preview
+</button>
+<button onclick="generatePDFDocument()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-3 rounded text-xs transition-colors flex items-center justify-center gap-1">
+📄 Save as PDF
+</button>
+</div>
+
+<!-- Ledger Activity History Log Dashboard -->
+<div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+<h4 class="text-xs font-semibold text-slate-200 mb-3 flex items-center gap-1.5">📊 Master History Log</h4>
+<div class="overflow-y-auto max-h-48 border border-slate-800 rounded">
+<table class="w-full text-left text-xs text-slate-400">
+<thead class="bg-slate-950 text-slate-300 sticky top-0">
+<tr>
+<th class="p-2">Doc ID</th>
+<th class="p-2">Type</th>
+<th class="p-2">Company</th>
+<th class="p-2 text-right">Grand Total</th>
+<th class="p-2 text-center">Actions</th>
+</tr>
+</thead>
+<tbody id="ledgerHistoryBody"></tbody>
+</table>
+</div>
+</div>
+</section>
+
+<!-- RIGHT LIVE PREVIEW CANVAS PANEL -->
+<section id="previewPanelSection" class="flex-1 bg-slate-800 p-4 sm:p-6 overflow-auto flex justify-center items-start print-canvas">
+<div id="previewScaleOuter" class="preview-scale-outer">
+<div id="previewScaleInner" class="preview-scale-inner">
+<!-- Holds one or more .a4-page sheets, one per printed page — filled by paginateDocumentIntoPages() -->
+<div id="printTargetPage" class="print-pages-stack"></div>
+</div>
+</div>
+</section>
+<!-- Off-screen measuring template: real A4 width/padding, unconstrained height, used to
+     measure how tall the generated document content actually is so it can be split into
+     correctly-sized A4 sheets. Never shown to the user. -->
+<div id="printMeasureSource" class="a4-measure-source no-print" aria-hidden="true"></div>
+</main>
+</div>
+
+<!-- Fullscreen Document Modal Preview Overlap -->
+<div id="previewModal" class="no-print hidden fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[150] flex flex-col">
+<header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between shadow-md">
+<div>
+<h4 class="text-sm font-bold text-amber-500 tracking-tight flex items-center gap-2"><span>👁️</span> Document Layout Preview Frame</h4>
+<p class="text-[11px] text-slate-400">Review structural spacing parameters before committing document export files.</p>
+</div>
+<div class="flex items-center gap-2">
+<button onclick="generatePDFDocument()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold py-1.5 px-4 rounded transition-all">
+Download PDF File
+</button>
+<button onclick="closeFullscreenPreview()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold py-1.5 px-3 rounded transition-all">
+Close Preview
+</button>
+</div>
+</header>
+<div class="flex-1 overflow-auto bg-slate-950 p-8 flex justify-center items-start">
+<div id="modalPreviewContainer" class="transform scale-95 origin-top transition-transform duration-200"></div>
+</div>
+</div>
+
+<!-- CRM Dynamic Registration Modal Overlap (handles both Create and Edit of a Company) -->
+<div id="crmModal" class="no-print hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md flex flex-col gap-4">
+<h4 id="crmModalTitle" class="text-xs font-bold text-amber-500">➕ Create Corporate Profile Anchor</h4>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Company Legal Name</label>
+<input type="text" id="modalCompName" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Company Physical Address</label>
+<textarea id="modalCompAddress" rows="2" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"></textarea>
+</div>
+<div id="crmModalContactBlock" class="border-t border-slate-800 pt-3">
+<h5 class="text-[10px] font-semibold text-slate-300 mb-2">Primary Contact Attn Person Info</h5>
+<div class="grid grid-cols-1 gap-2">
+<input type="text" id="modalContName" placeholder="Contact Person Name" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+<input type="text" id="modalContMobile" placeholder="Contact Number" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+<input type="email" id="modalContEmail" placeholder="Email Address" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+</div>
+<div class="flex justify-end gap-2 pt-2">
+<button onclick="toggleCRMModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded text-xs">Cancel</button>
+<button onclick="saveCRMProfile()" id="crmModalSaveBtn" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2 rounded text-xs">Save Master Entry</button>
+</div>
+</div>
+</div>
+
+<!-- Corporate Directory Management Modal: list, edit, delete companies & contacts -->
+<div id="directoryModal" class="no-print hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-2xl max-h-[85vh] flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<h4 class="text-xs font-bold text-amber-500">⚙ Manage Corporate CRM Directory</h4>
+<button onclick="closeDirectoryModal()" class="text-slate-400 hover:text-slate-200 text-sm leading-none">✕</button>
+</div>
+<div id="directoryListBody" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1"></div>
+<div class="flex justify-end pt-2 border-t border-slate-800">
+<button onclick="closeDirectoryModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded text-xs">Close</button>
+</div>
+</div>
+</div>
+
+<!-- Contact Edit/Create Modal -->
+<div id="contactModal" class="no-print hidden fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-sm flex flex-col gap-4">
+<h4 id="contactModalTitle" class="text-xs font-bold text-amber-500">✏️ Edit Contact</h4>
+<div class="grid grid-cols-1 gap-2">
+<input type="text" id="contactModalName" placeholder="Contact Person Name" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+<input type="text" id="contactModalMobile" placeholder="Contact Number" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+<input type="email" id="contactModalEmail" placeholder="Email Address" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div class="flex justify-end gap-2 pt-2">
+<button onclick="closeContactModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded text-xs">Cancel</button>
+<button onclick="saveContactModal()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2 rounded text-xs">Save Contact</button>
+</div>
+</div>
+</div>
+
+<!-- Supabase SDK via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+const CryptoGate = {
+encrypt: (str, key) => {
+let result = "";
+for (let i = 0; i < str.length; i++) {
+result += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+}
+return btoa(unescape(encodeURIComponent(result)));
+},
+decrypt: (b64, key) => {
+try {
+let str = decodeURIComponent(escape(atob(b64)));
+let result = "";
+for (let i = 0; i < str.length; i++) {
+result += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+}
+return result;
+} catch(e) { return ""; }
+}
+};
+
+let supabaseClient = null;
+let currentDocType = 'Quotation';
+let currentLinkedSourceRef = '';
+let includeSSTState = false;
+let includeValidityState = true;
+let includeDueDateState = true;
+
+let crmDatabase = [];
+let documentLedger = [];
+
+window.onload = function() {
+initGatewayUI();
+};
+
+function initGatewayUI() {
+const storedData = localStorage.getItem('secured_gate_bundle');
+if (storedData) {
+document.getElementById('setupFieldsBlock').classList.add('hidden');
+document.getElementById('gateSub').innerText = "Enter your credential account password to safely load the workspace endpoints.";
+} else {
+document.getElementById('setupFieldsBlock').classList.remove('hidden');
+document.getElementById('gateSub').innerText = "Configure your one-time Supabase remote keys. They will be encrypted safely locally.";
+}
+}
+
+async function handleGatewaySubmit() {
+const storedData = localStorage.getItem('secured_gate_bundle');
+const email = document.getElementById('gateEmail').value.trim();
+const password = document.getElementById('gatePassword').value.trim();
+
+if (!email || !password) {
+alert("Please complete the authorization email and password parameters fields.");
+return;
+}
+
+let targetUrl = "";
+let targetKey = "";
+
+if (!storedData) {
+targetUrl = document.getElementById('gateUrl').value.trim();
+targetKey = document.getElementById('gateKey').value.trim();
+if (!targetUrl || !targetKey) {
+alert("Please declare your primary initialization Supabase API keys endpoints.");
+return;
+}
+} else {
+const parsed = JSON.parse(storedData);
+targetUrl = CryptoGate.decrypt(parsed.u, password);
+targetKey = CryptoGate.decrypt(parsed.k, password);
+if (!targetUrl || !targetKey) {
+alert("Invalid cryptographic key signature. Please verify your validation password entry.");
+return;
+}
+}
+
+try {
+const client = supabase.createClient(targetUrl, targetKey);
+const { data, error } = await client.auth.signInWithPassword({ email, password });
+if (error) throw error;
+
+supabaseClient = client;
+
+if (!storedData) {
+const bundle = {
+u: CryptoGate.encrypt(targetUrl, password),
+k: CryptoGate.encrypt(targetKey, password)
+};
+localStorage.setItem('secured_gate_bundle', JSON.stringify(bundle));
+}
+
+document.getElementById('gateOverlay').classList.add('hidden');
+document.getElementById('appWorkspace').classList.remove('hidden');
+
+await fetchCloudData();
+renderCRMDropdowns();
+switchDocType('Quotation');
+renderLedgerHistory();
+// Re-run once more after layout/fonts settle, since the panel's real
+// size may not be final on the very first synchronous render.
+setTimeout(updatePreviewScale, 150);
+
+} catch (err) {
+alert("Security Authorization Failed: " + (err.message || err));
+}
+}
+
+function handleLogout() {
+if(supabaseClient) supabaseClient.auth.signOut();
+supabaseClient = null;
+document.getElementById('appWorkspace').classList.add('hidden');
+document.getElementById('gateOverlay').classList.remove('hidden');
+document.getElementById('gatePassword').value = "";
+initGatewayUI();
+}
+
+async function fetchCloudData() {
+try {
+const { data: profs, error: e1 } = await supabaseClient.from('profiles').select('*');
+if (!e1) crmDatabase = profs || [];
+
+const { data: docs, error: e2 } = await supabaseClient.from('documents').select('*');
+if (!e2) {
+documentLedger = (docs || []).map(d => {
+if (typeof d.items === 'string') d.items = JSON.parse(d.items);
+return d;
+});
+}
+} catch(e) {
+console.warn("Cloud connection sync anomaly, utilizing temporary local session variables instead.");
+}
+}
+
+function switchDocType(type) {
+currentDocType = type;
+document.querySelectorAll('.doc-tab-btn').forEach(btn => {
+btn.classList.remove('bg-amber-500', 'text-slate-950');
+btn.classList.add('bg-slate-800', 'text-slate-400');
+});
+const mapping = {'Quotation':'btn-Quotation','Invoice':'btn-Invoice','Receipt':'btn-Receipt','Payment Voucher':'btn-Voucher','Delivery Order':'btn-DO'};
+document.getElementById(mapping[type]).classList.remove('bg-slate-800', 'text-slate-400');
+document.getElementById(mapping[type]).classList.add('bg-amber-500', 'text-slate-950');
+generateFormInputs();
+
+const gridContainer = document.getElementById('itemsGridContainer');
+if(type === 'Receipt' || type === 'Payment Voucher') {
+gridContainer.style.display = 'none';
+} else {
+gridContainer.style.display = 'block';
+const headerCells = gridContainer.querySelectorAll('.price-cell');
+headerCells.forEach(cell => cell.style.display = (type === 'Delivery Order') ? 'none' : '');
+if(document.getElementById('itemsGridBody').children.length === 0) {
+addGridRow();
+} else {
+syncGridRowColumnsVisibility();
+}
+}
+syncLivePreviewCanvas();
+}
+
+function generateFormInputs() {
+const container = document.getElementById('dynamicFormContainer');
+const nextSeq = calculateNextSequenceNumber(currentDocType);
+const today = new Date();
+const todayStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`;
+
+let html = `
+<div class="grid grid-cols-2 gap-3">
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">${currentDocType} Reference Number</label>
+<input type="text" id="inpDocNum" value="${nextSeq}" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Issue Date</label>
+<input type="text" id="inpDocDate" placeholder="dd/mm/yyyy" value="${todayStr}" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+</div>
+`;
+
+if (currentDocType === 'Quotation' || currentDocType === 'Invoice') {
+html += `
+<div class="mt-2 flex flex-wrap gap-4 items-center">
+<div class="flex items-center gap-2">
+<input type="checkbox" id="inpIncludeSST" ${includeSSTState ? 'checked' : ''} onchange="includeSSTState=this.checked; syncLivePreviewCanvas();" class="rounded border-slate-700 bg-slate-800 text-amber-500 focus:ring-amber-500">
+<label for="inpIncludeSST" class="text-xs text-slate-300 select-none">Include SST</label>
+</div>
+`;
+
+if (currentDocType === 'Quotation') {
+html += `
+<div class="flex items-center gap-2">
+<input type="checkbox" id="inpIncludeValidity" ${includeValidityState ? 'checked' : ''} onchange="includeValidityState=this.checked; document.getElementById('validityBlock').style.display=this.checked?'block':'none'; syncLivePreviewCanvas();" class="rounded border-slate-700 bg-slate-800 text-amber-500 focus:ring-amber-500">
+<label for="inpIncludeValidity" class="text-xs text-slate-300 select-none">Include Quotation Validity</label>
+</div>
+</div>
+<div id="validityBlock" class="mt-1" style="display: ${includeValidityState ? 'block' : 'none'};">
+<label class="block text-[10px] text-slate-400 mb-1">Quotation Validity Window Period</label>
+<input type="text" id="inpValidity" value="30 Days" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+`;
+} else if (currentDocType === 'Invoice') {
+html += `
+<div class="flex items-center gap-2">
+<input type="checkbox" id="inpIncludeDueDate" ${includeDueDateState ? 'checked' : ''} onchange="includeDueDateState=this.checked; document.getElementById('dueDateBlock').style.display=this.checked?'grid':'none'; syncLivePreviewCanvas();" class="rounded border-slate-700 bg-slate-800 text-amber-500 focus:ring-amber-500">
+<label for="inpIncludeDueDate" class="text-xs text-slate-300 select-none">Include Payment Due Date</label>
+</div>
+</div>
+<div id="dueDateBlock" class="grid grid-cols-2 gap-3 mt-1" style="display: ${includeDueDateState ? 'grid' : 'none'};">
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Payment Due Settlement Date</label>
+<input type="text" id="inpDueDate" placeholder="dd/mm/yyyy" value="${todayStr}" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Reference PO Tracking Number (Optional)</label>
+<input type="text" id="inpSourceRef" value="${currentLinkedSourceRef}" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+</div>
+`;
+}
+} else if (currentDocType === 'Receipt' || currentDocType === 'Payment Voucher') {
+html += `
+<div class="grid grid-cols-2 gap-3 mt-2">
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Total Funds Transferred Amount (RM)</label>
+<input type="number" id="inpTotalAmount" value="0.00" step="0.01" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Payment Clearance Method</label>
+<select id="inpPayMethod" onchange="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+<option value="Bank Transfer">Bank Transfer</option>
+<option value="Cash">Cash</option>
+<option value="Cheque">Cheque</option>
+</select>
+</div>
+</div>
+<div>
+<label class="block text-[10px] text-slate-400 mb-1">Transaction Statement Allocation Reason ("Being Payment for...")</label>
+<input type="text" id="inpParticulars" value="Settlement payment charge details" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500">
+</div>
+`;
+} else if (currentDocType === 'Delivery Order') {
+html += `
+<div class="mt-2">
+<label class="block text-[10px] text-slate-400 mb-1">Source Reference Document Code Trigger Link</label>
+<input type="text" id="inpSourceRef" value="${currentLinkedSourceRef}" oninput="syncLivePreviewCanvas()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500" placeholder="e.g. Ref: INV-1024">
+</div>
+`;
+}
+container.innerHTML = html;
+}
+
+function calculateNextSequenceNumber(type) {
+const prefixes = {'Quotation':'QTN-','Invoice':'INV-','Receipt':'RCP-','Payment Voucher':'PV-','Delivery Order':'DO-'};
+const prefix = prefixes[type];
+let maxNum = 1000;
+documentLedger.forEach(d => {
+if(d.doc_type === type && d.doc_number.startsWith(prefix)) {
+const numPart = parseInt(d.doc_number.replace(prefix, ''));
+if(!isNaN(numPart) && numPart > maxNum) { maxNum = numPart; }
+}
+});
+return prefix + (maxNum + 1);
+}
+
+function renderCRMDropdowns() {
+const compSelect = document.getElementById('crmCompanySelect');
+compSelect.innerHTML = '<option value="">-- Choose Company --</option>';
+crmDatabase.forEach(c => { compSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`; });
+handleCompanySelect();
+}
+
+function handleCompanySelect() {
+const compId = document.getElementById('crmCompanySelect').value;
+const contSelect = document.getElementById('crmContactSelect');
+contSelect.innerHTML = '<option value="">-- Choose Contact --</option>';
+if(compId) {
+const comp = crmDatabase.find(c => c.id === compId);
+if(comp && comp.contacts) {
+comp.contacts.forEach(ct => { contSelect.innerHTML += `<option value="${ct.id}">${ct.name}</option>`; });
+if(comp.contacts.length > 0) { contSelect.value = comp.contacts[0].id; }
+}
+}
+syncLivePreviewCanvas();
+}
+
+function handleContactSelect() { syncLivePreviewCanvas(); }
+
+let editingCompanyId = null; // null = create mode; otherwise the company id being edited
+
+function toggleCRMModal() {
+const modal = document.getElementById('crmModal');
+const willOpen = modal.classList.contains('hidden');
+if(willOpen) {
+// Opening fresh via "+ New Profile" always means create mode
+editingCompanyId = null;
+document.getElementById('crmModalTitle').innerText = '➕ Create Corporate Profile Anchor';
+document.getElementById('crmModalSaveBtn').innerText = 'Save Master Entry';
+document.getElementById('crmModalContactBlock').style.display = 'block';
+document.getElementById('modalCompName').value = '';
+document.getElementById('modalCompAddress').value = '';
+document.getElementById('modalContName').value = '';
+document.getElementById('modalContMobile').value = '';
+document.getElementById('modalContEmail').value = '';
+}
+modal.classList.toggle('hidden');
+}
+
+function openEditCompanyModal(companyId) {
+const comp = crmDatabase.find(c => c.id === companyId);
+if(!comp) return;
+editingCompanyId = companyId;
+document.getElementById('crmModalTitle').innerText = '✏️ Edit Corporate Profile Anchor';
+document.getElementById('crmModalSaveBtn').innerText = 'Save Changes';
+// Editing here only touches company-level fields; contacts are managed individually in the directory list
+document.getElementById('crmModalContactBlock').style.display = 'none';
+document.getElementById('modalCompName').value = comp.name || '';
+document.getElementById('modalCompAddress').value = comp.address || '';
+document.getElementById('crmModal').classList.remove('hidden');
+}
+
+async function saveCRMProfile() {
+const name = document.getElementById('modalCompName').value.trim();
+const address = document.getElementById('modalCompAddress').value.trim();
+
+if(editingCompanyId) {
+// EDIT MODE: update an existing company's name/address only
+if(!name || !address) {
+alert("Please complete the required company name and address parameters.");
+return;
+}
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('profiles').update({ name, address }).eq('id', editingCompanyId);
+if(error) throw error;
+}
+const comp = crmDatabase.find(c => c.id === editingCompanyId);
+if(comp) { comp.name = name; comp.address = address; }
+renderCRMDropdowns();
+document.getElementById('crmCompanySelect').value = editingCompanyId;
+handleCompanySelect();
+toggleCRMModal();
+if(!document.getElementById('directoryModal').classList.contains('hidden')) renderDirectoryList();
+} catch(e) { alert("Error updating corporate profile anchor: " + e.message); }
+return;
+}
+
+// CREATE MODE
+const contName = document.getElementById('modalContName').value.trim();
+const contMobile = document.getElementById('modalContMobile').value.trim();
+const contEmail = document.getElementById('modalContEmail').value.trim();
+if(!name || !address || !contName) {
+alert("Please complete the required company name, address, and primary contact parameters.");
+return;
+}
+const newComp = {
+id: 'c_' + Date.now(),
+name: name,
+address: address,
+contacts: [{ id: 'ct_' + Date.now(), name: contName, mobile: contMobile, email: contEmail }]
+};
+
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('profiles').insert([newComp]);
+if(error) throw error;
+}
+crmDatabase.push(newComp);
+renderCRMDropdowns();
+document.getElementById('crmCompanySelect').value = newComp.id;
+handleCompanySelect();
+toggleCRMModal();
+if(!document.getElementById('directoryModal').classList.contains('hidden')) renderDirectoryList();
+} catch(e) { alert("Error uploading corporate profile anchor: " + e.message); }
+}
+
+async function deleteCompanyProfile(companyId) {
+const comp = crmDatabase.find(c => c.id === companyId);
+if(!comp) return;
+if(!confirm(`Are you sure you want to delete "${comp.name}" and all of its contacts? This cannot be undone.`)) return;
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('profiles').delete().eq('id', companyId);
+if(error) throw error;
+}
+crmDatabase = crmDatabase.filter(c => c.id !== companyId);
+renderCRMDropdowns();
+renderDirectoryList();
+} catch(e) { alert("Error deleting corporate profile anchor: " + e.message); }
+}
+
+/* --- Directory Management Modal (list / edit / delete companies & contacts) --- */
+
+function openDirectoryModal() {
+renderDirectoryList();
+document.getElementById('directoryModal').classList.remove('hidden');
+}
+
+function closeDirectoryModal() {
+document.getElementById('directoryModal').classList.add('hidden');
+}
+
+function renderDirectoryList() {
+const container = document.getElementById('directoryListBody');
+if(crmDatabase.length === 0) {
+container.innerHTML = '<p class="text-xs text-slate-500 italic text-center py-6">No corporate profiles have been registered yet.</p>';
+return;
+}
+container.innerHTML = crmDatabase.map(comp => {
+const contactsHtml = (comp.contacts && comp.contacts.length > 0)
+? comp.contacts.map(ct => `
+<div class="flex items-center justify-between bg-slate-800/60 rounded px-2 py-1.5">
+<div class="min-w-0">
+<p class="text-[11px] text-slate-200 truncate">${ct.name || '(unnamed contact)'}</p>
+<p class="text-[10px] text-slate-500 truncate">${ct.mobile || ''}${ct.mobile && ct.email ? ' • ' : ''}${ct.email || ''}</p>
+</div>
+<div class="flex gap-1 shrink-0">
+<button onclick="openEditContactModal('${comp.id}','${ct.id}')" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] px-1.5 py-0.5 rounded">Edit</button>
+<button onclick="deleteContact('${comp.id}','${ct.id}')" class="bg-red-600 hover:bg-red-700 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">✕</button>
+</div>
+</div>
+`).join('')
+: '<p class="text-[10px] text-slate-500 italic px-2">No contacts on file.</p>';
+
+return `
+<div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col gap-2">
+<div class="flex items-start justify-between gap-2">
+<div class="min-w-0">
+<p class="text-xs font-semibold text-amber-500 truncate">${comp.name}</p>
+<p class="text-[10px] text-slate-400 whitespace-pre-line">${comp.address || ''}</p>
+</div>
+<div class="flex gap-1 shrink-0">
+<button onclick="openEditCompanyModal('${comp.id}')" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] px-2 py-1 rounded">Edit</button>
+<button onclick="deleteCompanyProfile('${comp.id}')" class="bg-red-600 hover:bg-red-700 text-white text-[10px] px-2 py-1 rounded font-bold">Delete</button>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+${contactsHtml}
+</div>
+<button onclick="openAddContactModal('${comp.id}')" class="self-start text-[10px] text-amber-500 hover:underline mt-1">+ Add Contact</button>
+</div>
+`;
+}).join('');
+}
+
+/* --- Contact Edit/Create Modal --- */
+
+let contactModalCompanyId = null;
+let contactModalContactId = null; // null = adding a new contact to the company
+
+function openEditContactModal(companyId, contactId) {
+const comp = crmDatabase.find(c => c.id === companyId);
+const ct = comp && comp.contacts ? comp.contacts.find(x => x.id === contactId) : null;
+if(!comp || !ct) return;
+contactModalCompanyId = companyId;
+contactModalContactId = contactId;
+document.getElementById('contactModalTitle').innerText = '✏️ Edit Contact';
+document.getElementById('contactModalName').value = ct.name || '';
+document.getElementById('contactModalMobile').value = ct.mobile || '';
+document.getElementById('contactModalEmail').value = ct.email || '';
+document.getElementById('contactModal').classList.remove('hidden');
+}
+
+function openAddContactModal(companyId) {
+contactModalCompanyId = companyId;
+contactModalContactId = null;
+document.getElementById('contactModalTitle').innerText = '➕ Add Contact';
+document.getElementById('contactModalName').value = '';
+document.getElementById('contactModalMobile').value = '';
+document.getElementById('contactModalEmail').value = '';
+document.getElementById('contactModal').classList.remove('hidden');
+}
+
+function closeContactModal() {
+document.getElementById('contactModal').classList.add('hidden');
+contactModalCompanyId = null;
+contactModalContactId = null;
+}
+
+async function saveContactModal() {
+const comp = crmDatabase.find(c => c.id === contactModalCompanyId);
+if(!comp) { closeContactModal(); return; }
+const name = document.getElementById('contactModalName').value.trim();
+const mobile = document.getElementById('contactModalMobile').value.trim();
+const email = document.getElementById('contactModalEmail').value.trim();
+if(!name) {
+alert("Please provide the contact person's name.");
+return;
+}
+
+const updatedContacts = comp.contacts ? [...comp.contacts] : [];
+if(contactModalContactId) {
+const idx = updatedContacts.findIndex(x => x.id === contactModalContactId);
+if(idx > -1) updatedContacts[idx] = { ...updatedContacts[idx], name, mobile, email };
+} else {
+updatedContacts.push({ id: 'ct_' + Date.now(), name, mobile, email });
+}
+
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('profiles').update({ contacts: updatedContacts }).eq('id', comp.id);
+if(error) throw error;
+}
+comp.contacts = updatedContacts;
+renderDirectoryList();
+if(document.getElementById('crmCompanySelect').value === comp.id) handleCompanySelect();
+closeContactModal();
+} catch(e) { alert("Error saving contact: " + e.message); }
+}
+
+async function deleteContact(companyId, contactId) {
+const comp = crmDatabase.find(c => c.id === companyId);
+if(!comp) return;
+if(!confirm("Are you sure you want to delete this contact?")) return;
+const updatedContacts = (comp.contacts || []).filter(x => x.id !== contactId);
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('profiles').update({ contacts: updatedContacts }).eq('id', comp.id);
+if(error) throw error;
+}
+comp.contacts = updatedContacts;
+renderDirectoryList();
+if(document.getElementById('crmCompanySelect').value === comp.id) handleCompanySelect();
+} catch(e) { alert("Error deleting contact: " + e.message); }
+}
+
+function addGridRow() {
+const tbody = document.getElementById('itemsGridBody');
+const tr = document.createElement('tr');
+tr.className = 'border-b border-slate-800 grid-row-item';
+tr.innerHTML = `
+<td class="py-2 pr-2">
+<input type="text" placeholder="Line item descriptions" oninput="syncLivePreviewCanvas()" class="row-desc w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
+</td>
+<td class="py-2 px-1">
+<input type="number" value="1" min="1" oninput="syncLivePreviewCanvas()" class="row-qty w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500 text-center">
+</td>
+<td class="py-2 px-1 price-cell">
+<input type="number" value="0.00" step="0.01" min="0" oninput="syncLivePreviewCanvas()" class="row-price w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500 text-right">
+</td>
+<td class="py-2 text-right">
+<button onclick="this.parentElement.parentElement.remove(); syncLivePreviewCanvas();" class="text-red-400 hover:text-red-500 px-1">✕</button>
+</td>
+`;
+tbody.appendChild(tr);
+syncGridRowColumnsVisibility();
+syncLivePreviewCanvas();
+}
+
+function syncGridRowColumnsVisibility() {
+document.querySelectorAll('.grid-row-item').forEach(tr => {
+const pCell = tr.querySelector('.price-cell');
+if(pCell) pCell.style.display = (currentDocType === 'Delivery Order') ? 'none' : '';
+});
+}
+
+function gatherLineItems() {
+const items = [];
+document.querySelectorAll('.grid-row-item').forEach(tr => {
+const descInput = tr.querySelector('.row-desc');
+const qtyInput = tr.querySelector('.row-qty');
+const priceInput = tr.querySelector('.row-price');
+if (descInput && qtyInput && priceInput) {
+const desc = descInput.value.trim();
+const qty = parseFloat(qtyInput.value) || 0;
+const price = parseFloat(priceInput.value) || 0;
+if(desc) { items.push({ description: desc, quantity: qty, unit_price: price, total: qty * price }); }
+}
+});
+return items;
+}
+
+async function deleteLedgerEntry(id, event) {
+if(event) event.stopPropagation();
+if(confirm("Are you sure you want to delete this historical document entry?")) {
+try {
+if(supabaseClient) {
+const { error } = await supabaseClient.from('documents').delete().eq('id', id);
+if(error) throw error;
+}
+documentLedger = documentLedger.filter(x => x.id !== id);
+renderLedgerHistory();
+generateFormInputs();
+syncLivePreviewCanvas();
+} catch(e) { alert("Delete action fault logic error: " + e.message); }
+}
+}
+
+function formatNum(v) {
+return parseFloat(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/* Scales the live #printTargetPage stack (one or more true-size
+   210mm x 297mm .a4-page sheets, stacked with a gap between them) down
+   to fit whatever space the right/bottom preview panel actually has,
+   on both desktop (side-by-side) and mobile (stacked) layouts. Pages
+   are never resized (so text/line-wrapping stays identical to the
+   Full Preview and PDF export) — only visually scaled with a CSS
+   transform, and the wrapper is sized to match the scaled footprint
+   so the panel's flex/scroll behavior collapses around it correctly. */
+function updatePreviewScale() {
+const outer = document.getElementById('previewScaleOuter');
+const inner = document.getElementById('previewScaleInner');
+const stack = document.getElementById('printTargetPage');
+const panel = document.getElementById('previewPanelSection');
+if (!outer || !inner || !stack || !panel) return;
+
+// Natural size of the full page stack in pixels (fixed physical mm
+// sizes — this grows taller as more A4 sheets are added).
+const naturalWidth = stack.offsetWidth;
+const naturalHeight = stack.offsetHeight;
+if (!naturalWidth || !naturalHeight) return;
+
+// Available space inside the panel, minus its own padding, minus a
+// small safety margin so the scaled stack never touches the edges.
+const panelStyle = window.getComputedStyle(panel);
+const paddingX = parseFloat(panelStyle.paddingLeft) + parseFloat(panelStyle.paddingRight);
+const paddingY = parseFloat(panelStyle.paddingTop) + parseFloat(panelStyle.paddingBottom);
+const availableWidth = Math.max(panel.clientWidth - paddingX - 16, 100);
+const availableHeight = Math.max(panel.clientHeight - paddingY - 16, 100);
+
+const isMobile = window.innerWidth < 1024;
+// On mobile the stacked panel can grow tall (min-height: 60vh), so we
+// only constrain by width there — the user scrolls to see every page.
+// On desktop, constrain by width only too: with multiple pages the
+// stack is usually much taller than the panel, and constraining by
+// height there would shrink a 1-page document down to a sliver just
+// to make room for pages that aren't there. Width-fit + vertical
+// scroll is the natural way to browse a multi-page print preview.
+let scale = Math.min(availableWidth / naturalWidth, 1); // never scale up past 100%
+scale = Math.max(scale, 0.15); // safety floor
+
+inner.style.transform = `scale(${scale})`;
+outer.style.width = (naturalWidth * scale) + 'px';
+outer.style.height = (naturalHeight * scale) + 'px';
+}
+
+// Recompute whenever the window/panel is resized (covers desktop <->
+// mobile breakpoint changes, orientation changes, and browser zoom).
+window.addEventListener('resize', () => {
+clearTimeout(window.__previewScaleResizeTimer);
+window.__previewScaleResizeTimer = setTimeout(updatePreviewScale, 100);
+});
+
+/* ---- A4 pagination engine ----------------------------------------
+   Splits a generated document into as many true A4 sheets as it needs
+   so the live preview (and print/PDF output, which shares the same
+   markup) always matches real A4 dimensions instead of one page that
+   silently overflows or gets clipped.
+
+   How it works (build-and-measure-in-place, not measure-then-copy):
+   1. A real .a4-page element is created inside the hidden, off-screen
+      #printMeasureSource container (true A4 width, unconstrained
+      height) and the header/table-head is added to it.
+   2. Chunks (each table row, then the totals summary, then the
+      footer) are appended ONE AT A TIME directly into that same live
+      page element, and after each append we read the page's real
+      scrollHeight. If it now exceeds the usable A4 height (297mm
+      minus top/bottom padding), that last chunk is moved off — a new
+      .a4-page is started with a slim "continued" header + repeated
+      table thead, and the chunk is appended there instead.
+      Because the chunk is always measured inside the exact element
+      it will end up staying in (never a separate isolated copy), the
+      measured height and the rendered height can never disagree —
+      which is what caused rows to overflow/duplicate in earlier
+      versions of this pagination logic.
+   3. Once every chunk has been placed, all the finished .a4-page
+      elements are moved from the hidden measuring container into the
+      visible #printTargetPage stack.
+------------------------------------------------------------------- */
+
+const A4_PAGE_HEIGHT_MM = 297;
+// Fixed document margin: 20mm on all sides (matches the padding
+// utility below on .a4-page / A4_PAGE_CLASS).
+const A4_PAGE_PADDING_TOP_MM = 20;
+const A4_PAGE_PADDING_BOTTOM_MM = 20;
+const A4_PAGE_PADDING_CLASS = 'p-[20mm]';
+const A4_PAGE_CLASS = 'a4-page ' + A4_PAGE_PADDING_CLASS + ' flex flex-col justify-start gap-6 bg-white';
+// While a page is still being built, it must NOT have the real fixed
+// 297mm height from .a4-page — otherwise scrollHeight would always
+// read back at least 297mm regardless of how little content is on
+// the page (a block element's scrollHeight is never less than its own
+// CSS height), making every page look "full" after just one row. The
+// measuring class keeps the same width/padding but leaves height auto
+// so scrollHeight reflects the page's real, current content height;
+// startPage() swaps each finished page to the real A4_PAGE_CLASS once
+// pagination is complete and it's moved into the live canvas.
+const A4_PAGE_MEASURING_CLASS = 'w-full box-border ' + A4_PAGE_PADDING_CLASS + ' flex flex-col justify-start gap-6 bg-white';
+
+function mmToPx(mm) {
+// Use a live off-screen probe so this tracks the browser's actual mm
+// definition (96dpi standard: 1mm = 96/25.4 px) without hardcoding it.
+const probe = document.createElement('div');
+probe.style.width = mm + 'mm';
+probe.style.position = 'fixed';
+probe.style.visibility = 'hidden';
+document.body.appendChild(probe);
+const px = probe.getBoundingClientRect().width;
+document.body.removeChild(probe);
+return px;
+}
+
+/* Appends `html` (a string for one element) as a new child of `parentEl`
+   and returns the created element. `context` selects the wrapper used
+   to parse the HTML string, since browsers silently drop tags that
+   are invalid outside their normal parent (e.g. a bare <tr>...</tr>
+   string parsed inside a <div> is dropped entirely — it must be
+   parsed inside a <table><tbody> for the browser to keep it). */
+function appendHtml(parentEl, html, context) {
+const wrap = document.createElement('div');
+if (context === 'tr') {
+wrap.innerHTML = `<table><tbody>${html.trim()}</tbody></table>`;
+const tr = wrap.querySelector('tr');
+parentEl.appendChild(tr);
+return tr;
+}
+wrap.innerHTML = html.trim();
+const el = wrap.firstElementChild;
+parentEl.appendChild(el);
+return el;
+}
+
+/* Builds and paginates a document made of: a header block shown in
+   full only on page 1 (`headerHtml`), an optional table with a
+   repeating `theadHtml` and one HTML string per row in `rowHtmls`,
+   and trailing non-table blocks (`trailingHtmls`, e.g. totals summary
+   and footer/signature — these come after the table and are treated
+   just like additional rows: moved to a new page if they don't fit).
+   Renders the finished pages into `canvas` (replacing its previous
+   content). Pass theadHtml: '' and rowHtmls: [] for a document with
+   no table (only header + trailing blocks). */
+function renderPaginatedDocument(canvas, headerHtml, theadHtml, rowHtmls, trailingHtmls, docType) {
+// Width must match the real A4 content width (210mm minus left/right
+// padding) for line-wrapping to measure the same as the final render,
+// so the off-screen measuring container is fixed at the true A4 width
+// and each page is built at 100% of that (see .a4-measure-source CSS).
+const usableHeightPx = mmToPx(A4_PAGE_HEIGHT_MM - A4_PAGE_PADDING_TOP_MM - A4_PAGE_PADDING_BOTTOM_MM);
+const measure = document.getElementById('printMeasureSource');
+measure.innerHTML = '';
+measure.className = 'a4-measure-source';
+
+const pages = []; // { pageEl, tableEl (or null), tbodyEl (or null) }
+
+function startPage(isFirstPage) {
+const pageEl = document.createElement('div');
+pageEl.className = A4_PAGE_MEASURING_CLASS;
+measure.appendChild(pageEl);
+if (isFirstPage) {
+appendHtml(pageEl, `<div>${headerHtml}</div>`);
+} else {
+appendHtml(pageEl, `<div class="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-200 pb-2">
+<span>${docType} (continued)</span>
+<span>Page ${pages.length + 1}</span>
+</div>`);
+}
+let tableEl = null, tbodyEl = null;
+if (theadHtml) {
+tableEl = appendHtml(pageEl, `<table class="w-full text-left text-xs border-collapse"><thead>${theadHtml}</thead><tbody></tbody></table>`);
+tbodyEl = tableEl.querySelector('tbody');
+}
+// hasContent tracks whether this page has received any row/trailing
+// chunk yet (separate from the header/thead scaffolding above), so a
+// chunk taller than one full page still gets placed on an otherwise-
+// empty page instead of looping forever trying to make it fit.
+const page = { pageEl, tableEl, tbodyEl, hasContent: false };
+pages.push(page);
+return page;
+}
+
+// Appends `html` as a new <tr> into `page.tbodyEl` (for rows) or as a
+// direct child of `page.pageEl` (for non-row trailing blocks like the
+// totals summary/footer). If doing so pushes the page's real rendered
+// content height (scrollHeight, since the page is still in its
+// height:auto "measuring" state — see A4_PAGE_MEASURING_CLASS) past
+// the usable A4 height, the element is removed from this page and a
+// new page is started for it instead — but only if the page already
+// has other content, so a single chunk that's simply taller than one
+// page (e.g. a very long description) still gets placed rather than
+// looping forever.
+function placeChunk(page, html, asRow) {
+const el = asRow ? appendHtml(page.tbodyEl, html, 'tr') : appendHtml(page.pageEl, html);
+const hadOtherContent = page.hasContent;
+if (page.pageEl.scrollHeight > usableHeightPx && hadOtherContent) {
+el.remove();
+const newPage = startPage(false);
+return placeChunk(newPage, html, asRow);
+}
+page.hasContent = true;
+return page;
+}
+
+let page = startPage(true);
+rowHtmls.forEach(rowHtml => { page = placeChunk(page, rowHtml, true); });
+trailingHtmls.forEach(html => { page = placeChunk(page, html, false); });
+
+// Pagination decisions are now locked in — swap every page from the
+// height:auto measuring class to the real fixed-297mm .a4-page class
+// before moving it into the live canvas.
+pages.forEach(p => { p.pageEl.className = A4_PAGE_CLASS; });
+
+canvas.innerHTML = '';
+pages.forEach(p => canvas.appendChild(p.pageEl));
+measure.innerHTML = '';
+}
+
+function syncLivePreviewCanvas() {
+const canvas = document.getElementById('printTargetPage');
+const docNum = document.getElementById('inpDocNum')?.value || 'DRAFT';
+const docDate = document.getElementById('inpDocDate')?.value || '';
+const compId = document.getElementById('crmCompanySelect').value;
+const contId = document.getElementById('crmContactSelect').value;
+let targetCompany = { name: '[Select Client Company Anchor Profile]', address: 'Client Billing Address Physical Info Block Location' };
+let targetContact = { name: '', mobile: '', email: '' };
+if(compId) {
+const c = crmDatabase.find(x => x.id === compId);
+if(c) {
+targetCompany = c;
+if(c.contacts) {
+const ct = c.contacts.find(y => y.id === contId);
+if(ct) targetContact = ct;
+}
+}
+}
+
+let subtotal = 0;
+let sstAmount = 0;
+let grandTotal = 0;
+const items = gatherLineItems();
+if (currentDocType === 'Receipt' || currentDocType === 'Payment Voucher') {
+grandTotal = parseFloat(document.getElementById('inpTotalAmount')?.value) || 0;
+} else if (currentDocType !== 'Delivery Order') {
+subtotal = items.reduce((acc, row) => acc + row.total, 0);
+if(includeSSTState) { sstAmount = subtotal * 0.06; }
+grandTotal = subtotal + sstAmount;
+}
+
+let contactMetaHtml = "";
+if(targetContact.name) {
+contactMetaHtml = `<div class="mt-1 text-slate-700 font-medium">Attn: ${targetContact.name}</div>`;
+if(targetContact.mobile) contactMetaHtml += `<div class="text-slate-500 text-[11px]">Tel: ${targetContact.mobile}</div>`;
+if(targetContact.email) contactMetaHtml += `<div class="text-slate-500 text-[11px]">Email: ${targetContact.email}</div>`;
+}
+
+const headerHtml = `
+<div class="border-b-2 border-slate-800 pb-4 flex justify-between items-start">
+<div>
+<h3 class="text-base font-bold tracking-tight text-slate-900">RASHIDEE MOHD RASHID</h3>
+<p class="text-[11px] text-slate-500 max-w-sm mt-1 leading-relaxed">No. 45, Jalan Bangi Avenue 6/4, Bangi Avenue,<br>43000 Kajang, Selangor.</p>
+<p class="text-[11px] text-slate-500 mt-0.5">Tel: 60165000462 | Email: vedee2006@gmail.com</p>
+</div>
+<div class="text-right">
+<h4 class="text-base font-black text-amber-600 uppercase tracking-wider">${currentDocType}</h4>
+<p class="text-xs font-mono text-slate-700 mt-1">Ref: <span class="font-bold">${docNum}</span></p>
+<p class="text-xs text-slate-500">Date: ${docDate}</p>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4 text-xs">
+<div class="bg-slate-50 p-3 rounded border border-slate-100 flex flex-col gap-0.5">
+<strong class="text-slate-800 block text-sm">${targetCompany.name}</strong>
+<p class="text-slate-600 whitespace-pre-line leading-relaxed">${targetCompany.address}</p>
+</div>
+<div class="bg-slate-50 p-3 rounded border border-slate-100">
+${contactMetaHtml}
+${currentDocType === 'Quotation' && includeValidityState ? `<div class="mt-2 text-left text-xs"><span class="text-slate-500">Validity period:</span> <strong>${document.getElementById('inpValidity')?.value || '30 Days'}</strong></div>` : ''}
+${currentDocType === 'Invoice' && includeDueDateState ? `<div class="mt-2 text-left text-xs"><span class="text-slate-500">Due date:</span> <strong>${document.getElementById('inpDueDate')?.value || ''}</strong></div>` : ''}
+${(currentDocType === 'Invoice' || currentDocType === 'Delivery Order') && (document.getElementById('inpSourceRef')?.value) ? `<div class="mt-1 text-left text-[11px] text-amber-700 font-medium">Ref Link: ${document.getElementById('inpSourceRef').value}</div>` : ''}
+</div>
+</div>
+`;
+
+if(currentDocType === 'Receipt' || currentDocType === 'Payment Voucher') {
+const payMethod = document.getElementById('inpPayMethod')?.value || '';
+const particulars = document.getElementById('inpParticulars')?.value || '';
+const singlePageHtml = `
+<div class="a5-top-half p-[20mm] flex flex-col justify-between relative bg-white">
+<div>
+${headerHtml}
+<div class="bg-amber-50/50 border border-amber-100 rounded p-4 text-xs text-slate-800 flex flex-col gap-2 mt-4">
+<div class="flex justify-between border-b border-amber-200/60 pb-1.5">
+<span>Being payment for:</span>
+<strong class="text-slate-900">${particulars}</strong>
+</div>
+<div class="flex justify-between items-center pt-0.5">
+<span>Payment mode: <strong class="text-slate-700">${payMethod}</strong></span>
+<div class="text-right">
+<span class="text-[10px] font-bold uppercase text-slate-400 block">Total amount</span>
+<strong class="text-base text-amber-700 font-mono">RM ${formatNum(grandTotal)}</strong>
+</div>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-end text-[11px] pt-6 text-slate-600">
+<div>
+${currentDocType === 'Receipt' ? '<p class="font-medium italic text-amber-600">Thank you for your business transactions with us!</p>' : ''}
+<div class="mt-8 border-t border-slate-400 w-44 pt-1">${currentDocType === 'Payment Voucher' ? 'Authorized signature by:' : 'Issued by: Reza bin Mohd Rashid'}</div>
+</div>
+${currentDocType === 'Payment Voucher' ? `
+<div class="text-right">
+<div class="mt-8 border-t border-slate-400 w-44 pt-1 text-center">Received and accepted by:</div>
+</div>` : ''}
+</div>
+</div>
+`;
+// Receipt/Voucher content is always designed to fit in the top half of
+// one A4 sheet, so no pagination needed — render it as a single page.
+canvas.innerHTML = '';
+const page = document.createElement('div');
+page.className = 'a4-page p-0 flex flex-col justify-start';
+page.innerHTML = singlePageHtml;
+canvas.appendChild(page);
+} else {
+let rowsHtml = '';
+if(items.length === 0) {
+rowsHtml = `<tr><td colspan="${currentDocType==='Delivery Order'?2:4}" class="p-4 text-center text-slate-400 italic">No line items declared in form grid configuration.</td></tr>`;
+} else {
+items.forEach((item) => {
+rowsHtml += `
+<tr class="border-b border-slate-100 text-slate-700">
+<td class="py-2.5 font-medium">${item.description}</td>
+<td class="py-2.5 text-center font-mono">${item.quantity}</td>
+${currentDocType !== 'Delivery Order' ? `
+<td class="py-2.5 text-right font-mono">RM ${formatNum(item.unit_price)}</td>
+<td class="py-2.5 text-right font-mono font-semibold">RM ${formatNum(item.total)}</td>
+` : ''}
+</tr>
+`;
+});
+}
+
+let calculationSummarySectionBlock = '';
+if(currentDocType !== 'Delivery Order') {
+calculationSummarySectionBlock = `
+<div class="flex justify-end pt-2">
+<div class="w-64 flex flex-col gap-1.5 text-xs text-slate-600 border-t-2 border-slate-800 pt-2">
+<div class="flex justify-between">
+<span>TOTAL</span>
+<span class="font-mono">RM ${formatNum(subtotal)}</span>
+</div>
+${includeSSTState ? `
+<div class="flex justify-between text-amber-700 font-medium">
+<span>Corporate SST 6%</span>
+<span class="font-mono">+ RM ${formatNum(sstAmount)}</span>
+</div>
+` : ''}
+<div class="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-sm text-slate-900 bg-slate-50 p-2 rounded">
+<span>Grand total</span>
+<span class="font-mono text-amber-600">RM ${formatNum(grandTotal)}</span>
+</div>
+</div>
+</div>
+`;
+}
+
+let specializedFooterTermsTemplateBlock = '';
+if(currentDocType === 'Quotation') {
+const valString = includeValidityState ? (document.getElementById('inpValidity')?.value || '30 Days') : '[N/A]';
+specializedFooterTermsTemplateBlock = `
+<div class="text-[10px] text-slate-500 border-t border-slate-200 pt-3">
+<strong class="text-slate-700 block mb-1">Terms & conditions:</strong>
+<ol class="list-decimal pl-4 space-y-0.5 leading-normal">
+<li>Quotation is valid for ${valString}.</li>
+<li>Prices are negotiable and subject to change without notice.</li>
+<li>50% deposit are required upon confirmation to proceed.</li>
+<li>No work or goods will start or delivered until confirmation to proceed or issuance of PO received.</li>
+<li>Please do not hesitate to contact me for any further details.</li>
+</ol>
+</div>
+<div class="flex justify-between text-xs pt-4 text-slate-600">
+<div class="flex flex-col justify-end">
+<div class="border-t border-dashed border-slate-400 w-48 pt-1 text-left">Issued by: Reza bin Mohd Rashid</div>
+</div>
+<div class="text-right flex flex-col items-end">
+<p class="text-[10px] text-slate-400 italic max-w-xs mb-1 text-right">I hereby agree to proceed with this quotation.</p>
+<div class="w-64 border-t border-dashed border-slate-400 text-left pt-1 mt-12">
+<strong class="block text-slate-700 uppercase font-bold text-[9px] mb-2">Customer Signature</strong>
+<div class="grid grid-cols-1 gap-1 text-[10px] text-slate-700">
+<div>Name:</div>
+<div>Designation:</div>
+<div>Date:</div>
+<div>Stamp:</div>
+</div>
+</div>
+</div>
+</div>
+`;
+} else if(currentDocType === 'Invoice') {
+specializedFooterTermsTemplateBlock = `
+<div class="text-[10px] text-slate-500 border-t border-slate-200 pt-3">
+<strong class="text-slate-700 block mb-1">Terms & conditions:</strong>
+<ol class="list-decimal pl-4 space-y-0.5 leading-normal">
+<li>Payment can be made to Rashidee Mohd Rashid Maybank Berhad 164418042656.</li>
+<li>Please send the transfer slip after payment made.</li>
+<li>Your business is highly appreciated and look forward to serve you again.</li>
+</ol>
+</div>
+<div class="flex justify-between items-end text-xs pt-4 text-slate-600">
+<div>
+<div class="mt-8 border-t border-slate-400 w-48 pt-1">Issued by: Rashidee Mohd Rashid</div>
+</div>
+</div>
+`;
+} else if(currentDocType === 'Delivery Order') {
+specializedFooterTermsTemplateBlock = `
+<div class="flex justify-between items-end text-xs pt-8 text-slate-600">
+<div>
+<div class="border-t border-slate-400 w-48 pt-1">Delivered / Dispatched by:</div>
+</div>
+<div>
+<div class="border-t border-slate-400 w-56 pt-1 text-center">Received in good condition by:<br><span class="text-[9px] text-slate-400">(Client signature, name & stamp authorization on-site)</span></div>
+</div>
+</div>
+`;
+}
+
+// --- Build the document as: header + a table (thead + one <tr> per
+//     row) + trailing blocks (summary, footer) — then paginate them
+//     across as many true A4 sheets as needed, instead of one page
+//     that silently overflows or gets clipped. ---
+const theadHtml = `
+<tr class="border-b-2 border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
+<th class="py-2">Description</th>
+<th class="py-2 w-16 text-center">Qty</th>
+${currentDocType !== 'Delivery Order' ? `
+<th class="py-2 w-28 text-right">Unit Rate</th>
+<th class="py-2 w-28 text-right">Subtotal</th>
+` : ''}
+</tr>
+`;
+let rowHtmls;
+if (items.length === 0) {
+// The "no line items" placeholder row.
+rowHtmls = [rowsHtml];
+} else {
+rowHtmls = items.map((item) => `
+<tr class="border-b border-slate-100 text-slate-700">
+<td class="py-2.5 font-medium">${item.description}</td>
+<td class="py-2.5 text-center font-mono">${item.quantity}</td>
+${currentDocType !== 'Delivery Order' ? `
+<td class="py-2.5 text-right font-mono">RM ${formatNum(item.unit_price)}</td>
+<td class="py-2.5 text-right font-mono font-semibold">RM ${formatNum(item.total)}</td>
+` : ''}
+</tr>
+`);
+}
+
+const fullHeaderHtml = `${headerHtml}<div class="mt-4"></div>`;
+const trailingHtmls = [];
+if (calculationSummarySectionBlock) trailingHtmls.push(`<div>${calculationSummarySectionBlock}</div>`);
+if (specializedFooterTermsTemplateBlock) trailingHtmls.push(`<div class="flex flex-col gap-4">${specializedFooterTermsTemplateBlock}</div>`);
+
+renderPaginatedDocument(canvas, fullHeaderHtml, theadHtml, rowHtmls, trailingHtmls, currentDocType);
+}
+updatePreviewScale();
+}
+
+async function commitDocumentToLedger() {
+const docNum = document.getElementById('inpDocNum')?.value.trim();
+if(!docNum) {
+alert("Please declare an identification code sequence number configuration mapping value first.");
+return;
+}
+const match = documentLedger.find(d => d.doc_type === currentDocType && d.doc_number === docNum);
+if(match) {
+alert(`Error: Document code reference mapping ID [ ${docNum} ] is permanently locked in historical record ledger infrastructure matrices.`);
+return;
+}
+const compId = document.getElementById('crmCompanySelect').value;
+const contId = document.getElementById('crmContactSelect').value;
+const company = crmDatabase.find(c => c.id === compId);
+let subtotal = 0;
+let grandTotal = 0;
+const items = gatherLineItems();
+if (currentDocType === 'Receipt' || currentDocType === 'Payment Voucher') {
+grandTotal = parseFloat(document.getElementById('inpTotalAmount')?.value) || 0;
+} else if (currentDocType !== 'Delivery Order') {
+subtotal = items.reduce((acc, row) => acc + row.total, 0);
+let sstVal = includeSSTState ? (subtotal * 0.06) : 0;
+grandTotal = subtotal + sstVal;
+}
+
+const docEntry = {
+id: 'doc_' + Date.now(),
+doc_type: currentDocType,
+doc_number: docNum,
+doc_date: document.getElementById('inpDocDate')?.value || '',
+company_name: company ? company.name : 'Unknown Client Profile',
+company_id: compId,
+contact_id: contId,
+items: items,
+grand_total: grandTotal,
+source_ref: document.getElementById('inpSourceRef')?.value || '',
+validity: document.getElementById('inpValidity')?.value || '',
+due_date: document.getElementById('inpDueDate')?.value || '',
+pay_method: document.getElementById('inpPayMethod')?.value || '',
+particulars: document.getElementById('inpParticulars')?.value || '',
+has_sst: includeSSTState
+};
+
+try {
+if(supabaseClient) {
+const remoteData = {...docEntry, items: JSON.stringify(docEntry.items)};
+const { error } = await supabaseClient.from('documents').insert([remoteData]);
+if(error) throw error;
+}
+documentLedger.push(docEntry);
+renderLedgerHistory();
+alert(`Document entry ${docNum} has been safely logged permanently to cloud architecture database clusters.`);
+generateFormInputs();
+syncLivePreviewCanvas();
+} catch(e) { alert("Error uploading ledger transaction data index: " + e.message); }
+}
+
+function renderLedgerHistory() {
+const tbody = document.getElementById('ledgerHistoryBody');
+tbody.innerHTML = '';
+if(documentLedger.length === 0) {
+tbody.innerHTML = '<tr><td colspan="5" class="p-3 text-center text-slate-500 italic">No historical record items committed yet.</td></tr>';
+return;
+}
+documentLedger.forEach(d => {
+let crossBtnHtml = '';
+if(d.doc_type === 'Quotation' || d.doc_type === 'Invoice') {
+crossBtnHtml = `<button onclick="triggerCrossDocumentGeneration('${d.id}')" title="Generate Delivery Order" class="bg-teal-600 hover:bg-teal-700 text-white text-[10px] px-1.5 py-0.5 rounded">D.O.</button>`;
+}
+tbody.innerHTML += `
+<tr class="border-b border-slate-800/60 hover:bg-slate-800/40 text-slate-300">
+<td class="p-2 font-mono text-amber-500 font-bold">${d.doc_number}</td>
+<td class="p-2 text-[11px]">${d.doc_type}</td>
+<td class="p-2 truncate max-w-[100px]">${d.company_name}</td>
+<td class="p-2 text-right font-mono font-semibold">${d.doc_type==='Delivery Order'?'-':`RM ${formatNum(d.grand_total)}`}</td>
+<td class="p-2 flex gap-1 justify-center items-center">
+<button onclick="inspectHistoricalRecord('${d.id}')" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] px-1.5 py-0.5 rounded">View</button>
+<button onclick="replicateDraftFromRecord('${d.id}')" class="bg-amber-600 hover:bg-amber-700 text-slate-950 text-[10px] px-1.5 py-0.5 rounded font-medium">Clone</button>
+${crossBtnHtml}
+<button onclick="deleteLedgerEntry('${d.id}', event)" title="Delete" class="bg-red-600 hover:bg-red-700 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">✕</button>
+</td>
+</tr>
+`;
+});
+}
+
+function inspectHistoricalRecord(id) {
+const d = documentLedger.find(x => x.id === id);
+if(!d) return;
+includeSSTState = !!d.has_sst;
+switchDocType(d.doc_type);
+setTimeout(() => {
+if(document.getElementById('inpDocNum')) document.getElementById('inpDocNum').value = d.doc_number;
+if(document.getElementById('inpDocDate')) document.getElementById('inpDocDate').value = d.doc_date;
+if(document.getElementById('crmCompanySelect')) document.getElementById('crmCompanySelect').value = d.company_id;
+handleCompanySelect();
+if(document.getElementById('crmContactSelect')) document.getElementById('crmContactSelect').value = d.contact_id;
+if(d.doc_type === 'Quotation' && document.getElementById('inpValidity')) document.getElementById('inpValidity').value = d.validity;
+if(d.doc_type === 'Invoice') {
+if(document.getElementById('inpDueDate')) document.getElementById('inpDueDate').value = d.due_date;
+if(document.getElementById('inpSourceRef')) document.getElementById('inpSourceRef').value = d.source_ref;
+}
+if(d.doc_type === 'Receipt' || d.doc_type === 'Payment Voucher') {
+if(document.getElementById('inpTotalAmount')) document.getElementById('inpTotalAmount').value = d.grand_total;
+if(document.getElementById('inpPayMethod')) document.getElementById('inpPayMethod').value = d.pay_method;
+if(document.getElementById('inpParticulars')) document.getElementById('inpParticulars').value = d.particulars;
+}
+if(d.doc_type === 'Delivery Order' && document.getElementById('inpSourceRef')) document.getElementById('inpSourceRef').value = d.source_ref;
+if(document.getElementById('inpIncludeSST')) document.getElementById('inpIncludeSST').checked = includeSSTState;
+
+if(d.doc_type !== 'Receipt' && d.doc_type !== 'Payment Voucher') {
+const tbody = document.getElementById('itemsGridBody');
+tbody.innerHTML = '';
+d.items.forEach(item => {
+const tr = document.createElement('tr');
+tr.className = 'border-b border-slate-800 grid-row-item';
+tr.innerHTML = `
+<td class="py-2 pr-2"><input type="text" value="${item.description}" oninput="syncLivePreviewCanvas()" class="row-desc w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200"></td>
+<td class="py-2 px-1"><input type="number" value="${item.quantity}" oninput="syncLivePreviewCanvas()" class="row-qty w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 text-center"></td>
+<td class="py-2 px-1 price-cell"><input type="number" value="${item.unit_price}" step="0.01" oninput="syncLivePreviewCanvas()" class="row-price w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 text-right"></td>
+<td class="py-2 text-right"><button onclick="this.parentElement.parentElement.remove(); syncLivePreviewCanvas();" class="text-red-400 hover:text-red-500 px-1">✕</button></td>
+`;
+tbody.appendChild(tr);
+});
+syncGridRowColumnsVisibility();
+}
+syncLivePreviewCanvas();
+}, 50);
+}
+
+function replicateDraftFromRecord(id) {
+inspectHistoricalRecord(id);
+setTimeout(() => {
+const nextSeq = calculateNextSequenceNumber(currentDocType);
+if(document.getElementById('inpDocNum')) { document.getElementById('inpDocNum').value = nextSeq; }
+syncLivePreviewCanvas();
+alert(`Cloned as Fresh Draft! Assigned sequence reference ID adjusted to [ ${nextSeq} ] safely protecting original history data indexes blocks.`);
+}, 100);
+}
+
+function triggerCrossDocumentGeneration(id) {
+const src = documentLedger.find(x => x.id === id);
+if(!src) return;
+currentLinkedSourceRef = `Ref: ${src.doc_number}`;
+switchDocType('Delivery Order');
+setTimeout(() => {
+if(document.getElementById('crmCompanySelect')) document.getElementById('crmCompanySelect').value = src.company_id;
+handleCompanySelect();
+if(document.getElementById('crmContactSelect')) document.getElementById('crmContactSelect').value = src.contact_id;
+if(document.getElementById('inpSourceRef')) document.getElementById('inpSourceRef').value = currentLinkedSourceRef;
+const tbody = document.getElementById('itemsGridBody');
+tbody.innerHTML = '';
+src.items.forEach(item => {
+const tr = document.createElement('tr');
+tr.className = 'border-b border-slate-800 grid-row-item';
+tr.innerHTML = `
+<td class="py-2 pr-2"><input type="text" value="${item.description}" oninput="syncLivePreviewCanvas()" class="row-desc w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200"></td>
+<td class="py-2 px-1"><input type="number" value="${item.quantity}" oninput="syncLivePreviewCanvas()" class="row-qty w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 text-center"></td>
+<td class="py-2 px-1 price-cell" style="display:none;"><input type="number" value="0.00" class="row-price w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-slate-200 text-right"></td>
+<td class="py-2 text-right"><button onclick="this.parentElement.parentElement.remove(); syncLivePreviewCanvas();" class="text-red-400 hover:text-red-500 px-1">✕</button></td>
+`;
+tbody.appendChild(tr);
+});
+syncLivePreviewCanvas();
+alert(`Successfully generated fresh Delivery Order draft cross-populated from data indices of document ${src.doc_number}. Price figures stripped out cleanly.`);
+}, 100);
+}
+
+/* --- Optimized Processing Container Engine Pipelines --- */
+function openFullscreenPreview() {
+const canvasSource = document.getElementById('printTargetPage');
+const targetContainer = document.getElementById('modalPreviewContainer');
+targetContainer.innerHTML = canvasSource.innerHTML;
+// canvasSource is the .print-pages-stack holding one or more .a4-page
+// sheets (see renderPaginatedDocument), so copy its stacking class too.
+targetContainer.className = canvasSource.className + " transform scale-95 origin-top transition-transform duration-200";
+document.getElementById('previewModal').classList.remove('hidden');
+}
+
+function closeFullscreenPreview() {
+document.getElementById('previewModal').classList.add('hidden');
+document.getElementById('modalPreviewContainer').innerHTML = '';
+}
+
+function generatePDFDocument() {
+// After several rounds of html2canvas/html2pdf producing different rendering bugs
+// (blank captures, cropped/offset captures, spurious extra pages) on this specific
+// layout, this now uses the browser's own native print pipeline instead of a
+// rasterized screenshot. The stylesheet already defines a correct @media print
+// block (.no-print hides everything but the document, @page sets true A4) —
+// window.print() lets the browser's real layout/pagination engine use it directly,
+// which can't produce the crop/blank/offset artifacts a canvas-based capture can.
+// In the print dialog, choose "Save as PDF" as the destination.
+//
+// IMPORTANT: the Full Preview modal (#previewModal) is itself marked .no-print
+// (it's just an on-screen "view it bigger" convenience, and its content is a
+// disconnected copy made by openFullscreenPreview()). If it were left open,
+// window.print() would hide it along with everything else, producing a blank
+// print — so always close it first and print from the original #printTargetPage
+// (inside #previewPanelSection.print-canvas), which is the one element that's
+// kept live-in-sync by syncLivePreviewCanvas() and is what should always be
+// printed regardless of which button/screen triggered the print.
+closeFullscreenPreview();
+const referenceNumber = document.getElementById('inpDocNum')?.value || 'DOCUMENT';
+const originalTitle = document.title;
+document.title = referenceNumber; // browsers suggest this as the saved filename
+window.print();
+setTimeout(() => { document.title = originalTitle; }, 1000);
+}
+</script>
+</body>
+</html>
