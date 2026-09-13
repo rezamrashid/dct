@@ -6,15 +6,12 @@
 <title>Document Creator & Tracker</title>
 <!-- Tailwind CSS for Dark Slate & Amber corporate theme (v3: uses plain rgb/hex colors) -->
 <script src="https://cdn.tailwindcss.com"></script>
-<!-- html2pdf.js bundles html2canvas + jsPDF as window.html2canvas / window.jspdf.jsPDF.
-     Used directly (not via html2pdf's own high-level .save() orchestration) for a more
-     controlled, per-page direct-download PDF export — see generatePDFDirectDownload().
-     This CDN script reliably failed to load when the file was opened via file:// (confirmed
-     with an isolated single-script test independent of this app) — restored because the app
-     is now served over https:// (e.g. GitHub Pages), where that restriction doesn't apply.
-     generatePDFDocument() still falls back to the browser's print pipeline automatically if
-     this script isn't available for any reason, so nothing breaks if that assumption is wrong
-     in some environment. -->
+<!-- html2pdf.js loads fine over file:// AND https:// — Object.keys(window) after
+     load shows only 'html2pdf' (not 'html2canvas' or 'jspdf' as separate globals);
+     this build keeps those internal, so generatePDFDirectDownload() drives PDF export
+     entirely through html2pdf()'s own documented high-level API instead of assuming
+     those globals exist. generatePDFDocument() falls back to the browser's print
+     pipeline automatically if html2pdf isn't available for any reason. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -1886,62 +1883,78 @@ generatePDFDocumentViaPrint();
 }
 
 async function generatePDFDirectDownload(referenceNumber) {
-if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
-throw new Error('html2canvas/jsPDF not available (CDN script may not have loaded)');
+// This CDN build of html2pdf.js only exposes the single top-level
+// html2pdf() function on window — html2canvas and jsPDF are bundled
+// inside it privately, not attached to window separately (confirmed:
+// Object.keys(window) shows only 'html2pdf', not 'html2canvas' or
+// 'jspdf', even though the script loads and runs correctly — an
+// earlier version of this function checked for those two globals
+// directly and always concluded the library "wasn't available" even
+// when it was, incorrectly falling back to print every time). So this
+// uses html2pdf()'s own documented high-level API instead of driving
+// html2canvas/jsPDF by hand.
+if (typeof html2pdf === 'undefined') {
+throw new Error('html2pdf not available (CDN script may not have loaded)');
 }
-const { jsPDF } = window.jspdf;
-const sourcePages = Array.from(document.querySelectorAll('#printTargetPage .a4-page'));
-if (sourcePages.length === 0) throw new Error('No .a4-page elements found to export');
+const sourceStack = document.getElementById('printTargetPage');
+if (!sourceStack || !sourceStack.querySelector('.a4-page')) {
+throw new Error('No .a4-page elements found to export');
+}
 
-// Each source page is rendered from a detached, off-DOM-flow clone,
-// positioned at a real, positive on-screen coordinate (not an
-// extreme off-screen position like -99999px, which some browsers
-// deprioritize or skip layout/paint for) and given a moment to lay
-// out before capture.
+// Rendered from a detached clone at a real, positive on-screen
+// coordinate (not an extreme off-screen position like -99999px,
+// which some browsers deprioritize or skip layout/paint for),
+// covered rather than truly hidden so it still gets a normal paint.
+//
+// The clone is given an explicit width matching a real A4 page
+// (210mm) and each .a4-page is pinned to that same width — #printTargetPage
+// itself has no fixed width of its own; on screen it only gets sized
+// correctly because it's nested inside the live-preview's scaling
+// wrapper (#previewScaleOuter/#previewScaleInner). Detached from that
+// ancestor chain and placed in a bare staging div, it previously had
+// no width context at all, which let its flex/padding layout shift —
+// this is what pushed page 1's content down and let overflow spill
+// onto a spurious blank page 2.
+const clone = sourceStack.cloneNode(true);
+clone.style.width = '210mm';
+clone.style.display = 'block';
+const pageClones = clone.querySelectorAll('.a4-page');
+pageClones.forEach((p, i) => {
+p.style.boxShadow = 'none';
+p.style.margin = '0';
+p.style.width = '210mm';
+// Explicit break-after on every page except the last one — telling
+// html2pdf only to "avoid" breaking mid-page (the previous setting)
+// doesn't also guarantee a break happens between pages, so a small
+// layout discrepancy could still spill a sliver of the next page's
+// content onto an unwanted extra sheet, or leave a trailing blank
+// page. break-after: page forces exactly one page per .a4-page.
+p.style.breakAfter = (i < pageClones.length - 1) ? 'page' : 'auto';
+});
 const stage = document.createElement('div');
 stage.style.cssText = 'position:fixed; top:0; left:0; width:210mm; z-index:-1; opacity:0.01; pointer-events:none; background:white;';
-document.body.appendChild(stage);
-
-let pdf = null;
-try {
-for (let i = 0; i < sourcePages.length; i++) {
-const clone = sourcePages[i].cloneNode(true);
-clone.style.boxShadow = 'none';
-clone.style.margin = '0';
-stage.innerHTML = '';
 stage.appendChild(clone);
-// Let the browser actually lay out and paint this page before
-// capturing it — a zero-delay rAF plus a short timeout, rather
-// than capturing on the same tick it was inserted.
+document.body.appendChild(stage);
+// Let the browser actually lay out and paint before capturing.
 await new Promise(r => requestAnimationFrame(() => setTimeout(r, 50)));
 
-const canvas = await html2canvas(clone, {
-scale: 2,
-useCORS: true,
-backgroundColor: '#ffffff',
-width: clone.offsetWidth,
-height: clone.offsetHeight,
-windowWidth: clone.offsetWidth,
-windowHeight: clone.offsetHeight,
-});
-
-if (canvas.width === 0 || canvas.height === 0) {
-throw new Error(`Page ${i + 1} rendered with zero dimensions`);
-}
-const imgData = canvas.toDataURL('image/jpeg', 0.95);
-
-if (!pdf) {
-pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-} else {
-pdf.addPage('a4', 'portrait');
-}
-pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
-}
+try {
+await html2pdf().set({
+margin: 0,
+filename: `${referenceNumber}.pdf`,
+image: { type: 'jpeg', quality: 0.98 },
+html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: clone.scrollWidth },
+jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+// Each .a4-page is already a real, fixed-size, pre-paginated sheet
+// (see renderPaginatedDocument) with an explicit break-after set
+// above — this tells html2pdf to respect that CSS page-break
+// property rather than recalculating its own page breaks over the
+// whole stack.
+pagebreak: { mode: ['css', 'legacy'] },
+}).from(clone).save();
 } finally {
 stage.remove();
 }
-
-pdf.save(`${referenceNumber}.pdf`);
 }
 
 function generatePDFDocumentViaPrint() {
